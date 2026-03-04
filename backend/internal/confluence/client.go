@@ -1,0 +1,173 @@
+// Package confluence integrates DocTrack with Atlassian Confluence.
+package confluence
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"golang.org/x/time/rate"
+)
+
+// Client is a thin Confluence Cloud REST API v2 client.
+type Client struct {
+	baseURL   string
+	basicAuth string
+	http      *http.Client
+	limiter   *rate.Limiter
+}
+
+// Page represents a Confluence page.
+type Page struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Version struct {
+		Number int `json:"number"`
+	} `json:"version"`
+	Body struct {
+		Storage struct {
+			Value string `json:"value"`
+		} `json:"storage"`
+	} `json:"body"`
+}
+
+// NewClient creates a Confluence client for the given base URL with email + API token auth.
+func NewClient(baseURL, email, token string) *Client {
+	creds := base64.StdEncoding.EncodeToString([]byte(email + ":" + token))
+	return &Client{
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		basicAuth: "Basic " + creds,
+		http:      &http.Client{Timeout: 30 * time.Second},
+		limiter:   rate.NewLimiter(rate.Limit(5), 10),
+	}
+}
+
+// GetPage retrieves a page by its numeric ID.
+func (c *Client) GetPage(ctx context.Context, pageID string) (*Page, error) {
+	return c.getPage(ctx, fmt.Sprintf("/wiki/api/v2/pages/%s?body-format=storage", pageID))
+}
+
+// FindByTitle searches for a page by space ID and title.
+func (c *Client) FindByTitle(ctx context.Context, spaceID, title string) (*Page, error) {
+	path := fmt.Sprintf("/wiki/api/v2/pages?space-id=%s&title=%s&body-format=storage",
+		url.QueryEscape(spaceID), url.QueryEscape(title))
+	var result struct {
+		Results []Page `json:"results"`
+	}
+	if err := c.get(ctx, path, &result); err != nil {
+		return nil, err
+	}
+	if len(result.Results) == 0 {
+		return nil, nil
+	}
+	return &result.Results[0], nil
+}
+
+// CreatePage creates a new page under parentID in the given space.
+// spaceID must be the numeric Confluence space ID (not the short key).
+func (c *Client) CreatePage(ctx context.Context, spaceID, parentID, title, storageBody string) (*Page, error) {
+	body := map[string]any{
+		"spaceId":  spaceID,
+		"status":   "current",
+		"title":    title,
+		"parentId": parentID,
+		"body": map[string]any{
+			"representation": "storage",
+			"value":          storageBody,
+		},
+	}
+	var page Page
+	if err := c.post(ctx, "/wiki/api/v2/pages", body, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// UpdatePage updates page content, incrementing the version number.
+func (c *Client) UpdatePage(ctx context.Context, pageID string, version int, title, storageBody string) (*Page, error) {
+	body := map[string]any{
+		"id":      pageID,
+		"status":  "current",
+		"title":   title,
+		"version": map[string]any{"number": version + 1},
+		"body": map[string]any{
+			"representation": "storage",
+			"value":          storageBody,
+		},
+	}
+	var page Page
+	if err := c.put(ctx, fmt.Sprintf("/wiki/api/v2/pages/%s", pageID), body, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+func (c *Client) getPage(ctx context.Context, path string) (*Page, error) {
+	var page Page
+	if err := c.get(ctx, path, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	return c.do(req, out)
+}
+
+func (c *Client) post(ctx context.Context, path string, body, out any) error {
+	return c.sendJSON(ctx, http.MethodPost, path, body, out)
+}
+
+func (c *Client) put(ctx context.Context, path string, body, out any) error {
+	return c.sendJSON(ctx, http.MethodPut, path, body, out)
+}
+
+func (c *Client) sendJSON(ctx context.Context, method, path string, body, out any) error {
+	b, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshalling body: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, out)
+}
+
+func (c *Client) do(req *http.Request, out any) error {
+	if err := c.limiter.Wait(req.Context()); err != nil {
+		return fmt.Errorf("rate limiter: %w", err)
+	}
+	req.Header.Set("Authorization", c.basicAuth)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("http request: %w", err)
+	}
+	defer resp.Body.Close()
+	const maxBody = 10 << 20 // 10 MB
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return fmt.Errorf("reading response body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("confluence %s %s: %d %s", req.Method, req.URL.Path, resp.StatusCode, string(data))
+	}
+	if out != nil {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+	}
+	return nil
+}

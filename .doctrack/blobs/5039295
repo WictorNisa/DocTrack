@@ -1,0 +1,73 @@
+package cmd
+
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+	"github.com/wictorn/doctrack/internal/config"
+	"github.com/wictorn/doctrack/internal/differ"
+	"github.com/wictorn/doctrack/internal/store"
+	"github.com/wictorn/doctrack/internal/tracker"
+)
+
+var diffCmd = &cobra.Command{
+	Use:   "diff",
+	Short: "Show files changed since last sync",
+	RunE:  runDiff,
+}
+
+func init() {
+	diffCmd.Flags().Bool("patch", false, "Show full unified diff")
+	rootCmd.AddCommand(diffCmd)
+}
+
+func runDiff(cmd *cobra.Command, args []string) error {
+	cfg := configFromContext(cmd)
+	showPatch, _ := cmd.Flags().GetBool("patch")
+
+	snapshotPath := ".doctrack/snapshot.json"
+	oldSnap, err := store.LoadSnapshot(snapshotPath)
+	if err != nil {
+		oldSnap = store.EmptySnapshot()
+	}
+
+	newSnap, err := tracker.Scan(".", cfg)
+	if err != nil {
+		return fmt.Errorf("scanning files: %w", err)
+	}
+	changed := tracker.Diff(oldSnap, newSnap)
+	if len(changed) == 0 {
+		fmt.Println("Everything up to date.")
+		return nil
+	}
+
+	added := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	modified := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+	deleted := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	_ = config.CheckPermissions
+
+	for _, f := range changed {
+		var label, styledPath string
+		switch f.Status {
+		case tracker.StatusAdded:
+			label = "(new)"
+			styledPath = added.Render(f.Path)
+		case tracker.StatusModified:
+			label = "(modified)"
+			styledPath = modified.Render(f.Path)
+		case tracker.StatusDeleted:
+			label = "(deleted)"
+			styledPath = deleted.Render(f.Path)
+		}
+		fmt.Printf("  %-10s %s\n", label, styledPath)
+		if showPatch {
+			diff, err := differ.Compute(".", f)
+			if err == nil {
+				fmt.Println(diff)
+			}
+		}
+	}
+	fmt.Printf("\n%d file(s) changed\n", len(changed))
+	return nil
+}

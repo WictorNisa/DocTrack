@@ -1,0 +1,173 @@
+package confluence
+
+import (
+	"bytes"
+	"fmt"
+	"html"
+	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/util"
+)
+
+// ConvertMarkdown converts a Markdown string to Confluence storage format (XHTML).
+func ConvertMarkdown(md string) (string, error) {
+	gm := goldmark.New(
+		goldmark.WithRenderer(
+			renderer.NewRenderer(renderer.WithNodeRenderers(
+				util.Prioritized(&confluenceRenderer{}, 1000),
+			)),
+		),
+	)
+	var buf bytes.Buffer
+	if err := gm.Convert([]byte(md), &buf); err != nil {
+		return "", fmt.Errorf("converting markdown: %w", err)
+	}
+	return buf.String(), nil
+}
+
+type confluenceRenderer struct{}
+
+func (r *confluenceRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindDocument, r.renderDefault)
+	reg.Register(ast.KindHeading, r.renderHeading)
+	reg.Register(ast.KindParagraph, r.renderParagraph)
+	reg.Register(ast.KindFencedCodeBlock, r.renderCodeBlock)
+	reg.Register(ast.KindCodeBlock, r.renderCodeBlock)
+	reg.Register(ast.KindCodeSpan, r.renderCodeSpan)
+	reg.Register(ast.KindList, r.renderList)
+	reg.Register(ast.KindListItem, r.renderListItem)
+	reg.Register(ast.KindTextBlock, r.renderDefault)
+	reg.Register(ast.KindText, r.renderText)
+	reg.Register(ast.KindString, r.renderString)
+	reg.Register(ast.KindEmphasis, r.renderEmphasis)
+	reg.Register(ast.KindThematicBreak, r.renderHR)
+	reg.Register(ast.KindBlockquote, r.renderBlockquote)
+}
+
+func (r *confluenceRenderer) renderDefault(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderText(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	n := node.(*ast.Text)
+	_, _ = w.WriteString(html.EscapeString(string(n.Segment.Value(source))))
+	if n.SoftLineBreak() || n.HardLineBreak() {
+		_, _ = w.WriteString("\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderString(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	n := node.(*ast.String)
+	_, _ = w.WriteString(html.EscapeString(string(n.Value)))
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderHeading(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	n := node.(*ast.Heading)
+	if entering {
+		fmt.Fprintf(w, "<h%d>", n.Level)
+	} else {
+		fmt.Fprintf(w, "</h%d>\n", n.Level)
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderParagraph(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<p>")
+	} else {
+		_, _ = w.WriteString("</p>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderCodeBlock(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+	var lang string
+	if n, ok := node.(*ast.FencedCodeBlock); ok {
+		lang = string(n.Language(source))
+	}
+	fmt.Fprintf(w, `<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">%s</ac:parameter><ac:plain-text-body><![CDATA[`, html.EscapeString(lang))
+	lines := node.Lines()
+	for i := range lines.Len() {
+		line := lines.At(i)
+		// Escape ]]> sequences to prevent CDATA section breakout.
+		_, _ = w.WriteString(strings.ReplaceAll(string(line.Value(source)), "]]>", "]]]]><![CDATA[>"))
+	}
+	_, _ = w.WriteString("]]></ac:plain-text-body></ac:structured-macro>\n")
+	return ast.WalkSkipChildren, nil
+}
+
+func (r *confluenceRenderer) renderCodeSpan(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<code>")
+	} else {
+		_, _ = w.WriteString("</code>")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderList(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	n := node.(*ast.List)
+	tag := "ul"
+	if n.IsOrdered() {
+		tag = "ol"
+	}
+	if entering {
+		fmt.Fprintf(w, "<%s>\n", tag)
+	} else {
+		fmt.Fprintf(w, "</%s>\n", tag)
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderListItem(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<li>")
+	} else {
+		_, _ = w.WriteString("</li>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderEmphasis(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	n := node.(*ast.Emphasis)
+	tag := "em"
+	if n.Level == 2 {
+		tag = "strong"
+	}
+	if entering {
+		fmt.Fprintf(w, "<%s>", tag)
+	} else {
+		fmt.Fprintf(w, "</%s>", tag)
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderHR(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString("<hr/>\n")
+	}
+	return ast.WalkContinue, nil
+}
+
+func (r *confluenceRenderer) renderBlockquote(w util.BufWriter, source []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	if entering {
+		_, _ = w.WriteString(`<ac:structured-macro ac:name="info"><ac:rich-text-body>`)
+	} else {
+		_, _ = w.WriteString("</ac:rich-text-body></ac:structured-macro>\n")
+	}
+	return ast.WalkContinue, nil
+}

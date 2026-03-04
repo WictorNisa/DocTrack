@@ -1,0 +1,39 @@
+// Package ai provides a unified interface to AI providers.
+package ai
+
+import (
+	"context"
+	"fmt"
+)
+
+// DocUpdateRequest contains everything the AI needs to generate or update a doc.
+type DocUpdateRequest struct {
+	FilePath    string
+	Diff        string
+	ExistingDoc string
+	Language    string
+}
+
+// DocUpdateResponse holds the AI-generated documentation content.
+type DocUpdateResponse struct {
+	Content    string
+	TokensUsed int
+	Model      string
+}
+
+// Provider is the interface implemented by each AI backend.
+type Provider interface {
+	GenerateDocUpdate(ctx context.Context, req DocUpdateRequest) (*DocUpdateResponse, error)
+}
+
+// NewProvider returns the correct Provider for the given provider name.
+func NewProvider(providerName, model, apiKey, baseURL string) (Provider, error) {
+	switch providerName {
+	case "openai":
+		return newOpenAIProvider(model, apiKey, baseURL), nil
+	case "anthropic":
+		return newAnthropicProvider(model, apiKey), nil
+	default:
+		return nil, fmt.Errorf("unknown provider %q: use \"openai\" or \"anthropic\"", providerName)
+	}
+}

@@ -1,0 +1,298 @@
+// Package tracker detects which source files changed since the last sync.
+package tracker
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/wictorn/doctrack/internal/config"
+	"github.com/wictorn/doctrack/internal/store"
+)
+
+// Status describes the change type for a file.
+type Status string
+
+const (
+	StatusAdded    Status = "added"
+	StatusModified Status = "modified"
+	StatusDeleted  Status = "deleted"
+)
+
+// ChangedFile holds both path and hash information for a changed file.
+type ChangedFile struct {
+	Path    string
+	OldHash string
+	NewHash string
+	Status  Status
+}
+
+// Scan walks the project rooted at root and returns the current snapshot.
+func Scan(root string, cfg *config.Config) (*store.Snapshot, error) {
+	aiIgnore := loadAIIgnore(root)
+	files, err := listFiles(root, cfg, aiIgnore)
+	if err != nil {
+		return nil, fmt.Errorf("listing files: %w", err)
+	}
+
+	entries, err := hashFiles(root, files)
+	if err != nil {
+		return nil, fmt.Errorf("hashing files: %w", err)
+	}
+
+	return &store.Snapshot{
+		Timestamp: time.Now(),
+		Files:     entries,
+	}, nil
+}
+
+// Diff returns files that changed between old and new snapshots.
+func Diff(old, new *store.Snapshot) []ChangedFile {
+	var changed []ChangedFile
+
+	for path, newEntry := range new.Files {
+		oldEntry, existed := old.Files[path]
+		if !existed {
+			changed = append(changed, ChangedFile{
+				Path:    path,
+				NewHash: newEntry.Hash,
+				Status:  StatusAdded,
+			})
+		} else if oldEntry.Hash != newEntry.Hash {
+			changed = append(changed, ChangedFile{
+				Path:    path,
+				OldHash: oldEntry.Hash,
+				NewHash: newEntry.Hash,
+				Status:  StatusModified,
+			})
+		}
+	}
+
+	for path, oldEntry := range old.Files {
+		if _, exists := new.Files[path]; !exists {
+			changed = append(changed, ChangedFile{
+				Path:    path,
+				OldHash: oldEntry.Hash,
+				Status:  StatusDeleted,
+			})
+		}
+	}
+	return changed
+}
+
+// AllFiles returns every file in the snapshot as a ChangedFile (for --force).
+func AllFiles(snap *store.Snapshot) []ChangedFile {
+	out := make([]ChangedFile, 0, len(snap.Files))
+	for path, entry := range snap.Files {
+		out = append(out, ChangedFile{
+			Path:    path,
+			NewHash: entry.Hash,
+			Status:  StatusModified,
+		})
+	}
+	return out
+}
+
+// listFiles returns all tracked file paths, using git ls-files when available.
+func listFiles(root string, cfg *config.Config, aiIgnore []string) ([]string, error) {
+	if isGitRepo(root) {
+		return gitListFiles(root, cfg)
+	}
+	return walkFiles(root, cfg, aiIgnore)
+}
+
+func isGitRepo(root string) bool {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--git-dir")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
+}
+
+func gitListFiles(root string, cfg *config.Config) ([]string, error) {
+	// --cached: tracked files; --others --exclude-standard: untracked files
+	// that aren't gitignored. Together they cover new projects with no commits.
+	cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+
+	all := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var filtered []string
+	for _, f := range all {
+		if f == "" {
+			continue
+		}
+		if matchesPatterns(f, cfg.Include) && !matchesPatterns(f, cfg.Exclude) {
+			filtered = append(filtered, f)
+		}
+	}
+	return filtered, nil
+}
+
+func walkFiles(root string, cfg *config.Config, aiIgnore []string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			base := d.Name()
+			if base == ".git" || base == "node_modules" || base == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if matchesPatterns(rel, aiIgnore) {
+			return nil
+		}
+		if matchesPatterns(rel, cfg.Include) && !matchesPatterns(rel, cfg.Exclude) {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	return files, err
+}
+
+// hashFiles computes SHA-256 for each file path using a bounded worker pool.
+func hashFiles(root string, paths []string) (map[string]store.FileEntry, error) {
+	type result struct {
+		path  string
+		entry store.FileEntry
+		err   error
+	}
+
+	jobs := make(chan string, len(paths))
+	results := make(chan result, len(paths))
+
+	workers := runtime.NumCPU()
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range jobs {
+				abs := filepath.Join(root, filepath.FromSlash(p))
+				entry, err := hashFile(abs)
+				results <- result{path: p, entry: entry, err: err}
+			}
+		}()
+	}
+
+	for _, p := range paths {
+		jobs <- p
+	}
+	close(jobs)
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	entries := make(map[string]store.FileEntry, len(paths))
+	for r := range results {
+		if r.err != nil {
+			return nil, fmt.Errorf("hashing %s: %w", r.path, r.err)
+		}
+		entries[r.path] = r.entry
+	}
+	return entries, nil
+}
+
+// hashFile hashes a single file by streaming through sha256 (no full read).
+func hashFile(path string) (store.FileEntry, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return store.FileEntry{}, fmt.Errorf("stat: %w", err)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return store.FileEntry{}, fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return store.FileEntry{}, fmt.Errorf("reading: %w", err)
+	}
+
+	return store.FileEntry{
+		Hash:    fmt.Sprintf("%x", h.Sum(nil)),
+		ModTime: info.ModTime(),
+		Size:    info.Size(),
+	}, nil
+}
+
+// matchesPatterns returns true if path matches any of the glob patterns.
+func matchesPatterns(path string, patterns []string) bool {
+	for _, pat := range patterns {
+		if matched, _ := doubleStarMatch(pat, path); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// doubleStarMatch handles ** in glob patterns.
+// Supports: **/suffix, prefix/**/suffix, prefix/**
+func doubleStarMatch(pattern, name string) (bool, error) {
+	if !strings.Contains(pattern, "**") {
+		return filepath.Match(pattern, name)
+	}
+	// Handle trailing ** (e.g. "vendor/**")
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		return strings.HasPrefix(name, prefix+"/") || name == prefix, nil
+	}
+	parts := strings.SplitN(pattern, "**/", 2)
+	if len(parts) == 2 {
+		prefix := parts[0]
+		suffix := parts[1]
+		if prefix != "" && !strings.HasPrefix(name, prefix) {
+			return false, nil
+		}
+		name = strings.TrimPrefix(name, prefix)
+		segments := strings.Split(name, "/")
+		for i := range segments {
+			candidate := strings.Join(segments[i:], "/")
+			if m, _ := filepath.Match(suffix, candidate); m {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return filepath.Match(pattern, name)
+}
+
+// loadAIIgnore reads .aiignore and returns patterns. Returns default patterns if missing.
+func loadAIIgnore(root string) []string {
+	defaults := []string{".env", "*.pem", "*.key", "**/secrets/**", "**/.env*"}
+	path := filepath.Join(root, ".aiignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return defaults
+	}
+
+	var patterns []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		patterns = append(patterns, line)
+	}
+	return append(defaults, patterns...)
+}

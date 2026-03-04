@@ -1,0 +1,107 @@
+// Package differ computes unified diffs for changed source files.
+package differ
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	"github.com/sergi/go-diff/diffmatchpatch"
+	"github.com/wictorn/doctrack/internal/tracker"
+)
+
+// Compute returns a unified diff for the changed file f.
+func Compute(root string, f tracker.ChangedFile) (string, error) {
+	if f.Status == tracker.StatusDeleted {
+		return fmt.Sprintf("--- %s\n+++ /dev/null\n@@ -1 +0,0 @@\n(file deleted)\n", f.Path), nil
+	}
+	if isGitRepo(root) {
+		diff, err := gitDiff(root, f)
+		if err == nil {
+			return diff, nil
+		}
+	}
+	return blobDiff(root, f)
+}
+
+func isGitRepo(root string) bool {
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--git-dir")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run() == nil
+}
+
+func gitDiff(root string, f tracker.ChangedFile) (string, error) {
+	if f.Status == tracker.StatusAdded {
+		return newFileDiff(filepath.Join(root, filepath.FromSlash(f.Path)))
+	}
+	cmd := exec.Command("git", "-C", root, "diff", "HEAD", "--", f.Path)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w", err)
+	}
+	if len(out) == 0 {
+		return newFileDiff(filepath.Join(root, filepath.FromSlash(f.Path)))
+	}
+	return string(out), nil
+}
+
+func newFileDiff(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading file: %w", err)
+	}
+	lines := strings.Split(string(data), "\n")
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "--- /dev/null\n+++ %s\n@@ -0,0 +1,%d @@\n", filepath.Base(path), len(lines))
+	for _, l := range lines {
+		sb.WriteString("+" + l + "\n")
+	}
+	return sb.String(), nil
+}
+
+func blobDiff(root string, f tracker.ChangedFile) (string, error) {
+	blobDir := filepath.Join(root, ".doctrack", "blobs")
+	if err := os.MkdirAll(blobDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating blob dir: %w", err)
+	}
+	absPath := filepath.Join(root, filepath.FromSlash(f.Path))
+	newContent, err := os.ReadFile(absPath)
+	if err != nil {
+		return "", fmt.Errorf("reading file: %w", err)
+	}
+	var oldContent string
+	if f.OldHash != "" {
+		blobPath := filepath.Join(blobDir, f.OldHash[:7])
+		data, err := os.ReadFile(blobPath)
+		if err == nil {
+			oldContent = string(data)
+		}
+	}
+	newKey := f.NewHash
+	if newKey == "" {
+		newKey = "new"
+	}
+	if err := os.WriteFile(filepath.Join(blobDir, newKey[:7]), newContent, 0o644); err != nil {
+		return "", fmt.Errorf("writing blob: %w", err)
+	}
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(oldContent, string(newContent), false)
+	return patchToUnified(f.Path, oldContent, diffs, dmp), nil
+}
+
+func patchToUnified(name, oldText string, diffs []diffmatchpatch.Diff, dmp *diffmatchpatch.DiffMatchPatch) string {
+	patches := dmp.PatchMake(oldText, diffs)
+	if len(patches) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "--- %s\n+++ %s\n", name, name)
+	for _, p := range patches {
+		sb.WriteString(p.String())
+	}
+	return sb.String()
+}

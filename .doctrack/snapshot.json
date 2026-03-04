@@ -1,0 +1,115 @@
+{
+  "timestamp": "2026-02-27T14:38:03.863375+01:00",
+  "files": {
+    "backend/cmd/config.go": {
+      "hash": "a11e1032623e33f0d8d6698cb1aac6dce7857665740c5a63ea7c88e113add631",
+      "mtime": "2026-02-27T13:51:09.696721923+01:00",
+      "size": 2761
+    },
+    "backend/cmd/diff.go": {
+      "hash": "5039295d06121554d0a33df1d99191f2e8016cdf3fa5f7e39033c4df73db474e",
+      "mtime": "2026-02-27T13:51:09.696677214+01:00",
+      "size": 1831
+    },
+    "backend/cmd/init.go": {
+      "hash": "0383dbb0fa03994eae2dd2831852acecdbea365c29db12fb4bcabfb8269b5ef7",
+      "mtime": "2026-02-27T13:51:09.748057356+01:00",
+      "size": 3581
+    },
+    "backend/cmd/root.go": {
+      "hash": "38ad106757845fb3bdf8ed107203dac799ee692c7a35ca1d2a0a2263722487c2",
+      "mtime": "2026-02-27T14:17:13.506362712+01:00",
+      "size": 2846
+    },
+    "backend/cmd/sync.go": {
+      "hash": "7e5dc940c887d6e6f3dc4b01414ab0d3bec1af62a79be1a14b7c9010024bae66",
+      "mtime": "2026-02-27T13:51:09.696982672+01:00",
+      "size": 5206
+    },
+    "backend/cmd/version.go": {
+      "hash": "aef894841871a65a408948bd25541e5b1977ee7f83448bda7252bc89759945fd",
+      "mtime": "2026-02-27T13:51:09.684275136+01:00",
+      "size": 388
+    },
+    "backend/internal/ai/anthropic.go": {
+      "hash": "6404b7e023055193570d1b1ad6486937752bcd46072cce81d443613bd64f4d45",
+      "mtime": "2026-02-27T13:51:09.761859763+01:00",
+      "size": 2096
+    },
+    "backend/internal/ai/openai.go": {
+      "hash": "9ea497f742f8e73697b7dde0dfd04ce124d7f738e3395e5d3f662b0cc6eea327",
+      "mtime": "2026-02-27T13:51:09.765615666+01:00",
+      "size": 1950
+    },
+    "backend/internal/ai/prompt.go": {
+      "hash": "b7efc42371d342b311eb4e291fb75a5b788bc10a4df59b27e6835e9e1f13ef7e",
+      "mtime": "2026-02-27T13:51:09.713218403+01:00",
+      "size": 1844
+    },
+    "backend/internal/ai/provider.go": {
+      "hash": "c72e09a24e6f07571c78880c80c80bc6c18b93e9991b3df5fe09307602d958be",
+      "mtime": "2026-02-27T13:51:09.713136861+01:00",
+      "size": 1063
+    },
+    "backend/internal/config/config.go": {
+      "hash": "587277e5f3e58ccc43a64363177d93ff34bda57ed0ba9905dbd57bfa1ff8bdf9",
+      "mtime": "2026-02-27T13:51:09.687823414+01:00",
+      "size": 5107
+    },
+    "backend/internal/confluence/client.go": {
+      "hash": "e5b2b4f6a0b415b0b2e3d6f20cf92b3a9bd15b4067f2bc343cd9a072ab6d01c9",
+      "mtime": "2026-02-27T13:51:09.765711415+01:00",
+      "size": 4718
+    },
+    "backend/internal/confluence/converter.go": {
+      "hash": "e0f495220fb90d375f548dcca91535a7de9218b7271cb6c3410e668528c28168",
+      "mtime": "2026-02-27T13:51:09.713330444+01:00",
+      "size": 5477
+    },
+    "backend/internal/confluence/sync.go": {
+      "hash": "26c2547bcd7d5966343714a61014d5063bd1d5d85b083d7f4adef3a446794103",
+      "mtime": "2026-02-27T13:51:09.765685999+01:00",
+      "size": 3434
+    },
+    "backend/internal/differ/differ.go": {
+      "hash": "1ea2cc5313848a9d7debb48e2a854d561b9c38df245cf0316858e164a32acb16",
+      "mtime": "2026-02-27T13:51:09.697317295+01:00",
+      "size": 2979
+    },
+    "backend/internal/docs/index.go": {
+      "hash": "ac0158ec0faef7319f067afd3f69832835656e8819c08dfa44a058a4319fe995",
+      "mtime": "2026-02-27T13:51:09.719076839+01:00",
+      "size": 2391
+    },
+    "backend/internal/docs/manager.go": {
+      "hash": "cdde36cb2b583e3b482f266e6aedc2a43d755ffa5df152f8999c63781c170ff7",
+      "mtime": "2026-02-27T13:51:09.710354247+01:00",
+      "size": 4743
+    },
+    "backend/internal/docs/mapper.go": {
+      "hash": "6504bb4672f740bd06ea722da1a118711a82296830a9682bbe76a15db392459e",
+      "mtime": "2026-02-27T13:51:09.71310582+01:00",
+      "size": 1154
+    },
+    "backend/internal/scanner/scanner.go": {
+      "hash": "f6276df1bee4128c6be9f457bc28e0d406e4200f703202b43d544ce73e7906e4",
+      "mtime": "2026-02-27T13:51:09.751902925+01:00",
+      "size": 2203
+    },
+    "backend/internal/store/store.go": {
+      "hash": "e66c4399d1fdb41b0b53c3f3c3416da01a4a383e8c76b8842208e0b63e24d47e",
+      "mtime": "2026-02-27T13:51:09.69689663+01:00",
+      "size": 1767
+    },
+    "backend/internal/tracker/tracker.go": {
+      "hash": "db212c1d00f01df8c5dc71fe5319d1659a529b135fa4fc2bafbc28967245e537",
+      "mtime": "2026-02-27T14:30:34.130061605+01:00",
+      "size": 7221
+    },
+    "backend/main.go": {
+      "hash": "c52c9e5561d7143bc257f0c78ff98dc7d5b0042b195d630b17ecbfd575102615",
+      "mtime": "2026-02-27T13:51:09.683644138+01:00",
+      "size": 360
+    }
+  }
+}

@@ -1,0 +1,135 @@
+package cmd
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/wictorn/doctrack/internal/config"
+)
+
+var configCmd = &cobra.Command{
+	Use:   "config",
+	Short: "Manage DocTrack configuration",
+}
+
+var configGetCmd = &cobra.Command{
+	Use:   "get <key>",
+	Short: "Get a configuration value",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runConfigGet,
+}
+
+var configSetCmd = &cobra.Command{
+	Use:   "set <key> <value>",
+	Short: "Set a configuration value",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runConfigSet,
+}
+
+var configListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all configuration values",
+	RunE:  runConfigList,
+}
+
+func init() {
+	configCmd.AddCommand(configGetCmd, configSetCmd, configListCmd)
+	rootCmd.AddCommand(configCmd)
+}
+
+func runConfigGet(cmd *cobra.Command, args []string) error {
+	cfg := configFromContext(cmd)
+	key := args[0]
+	val, err := configField(cfg, key)
+	if err != nil {
+		return err
+	}
+	fmt.Println(val)
+	return nil
+}
+
+func runConfigSet(cmd *cobra.Command, args []string) error {
+	cfgPath, _ := cmd.Root().PersistentFlags().GetString("config")
+	if cfgPath == "" {
+		cfgPath = ".doctrack.yaml"
+	}
+	cfg := configFromContext(cmd)
+	key, val := args[0], args[1]
+	switch key {
+	case "provider":
+		cfg.Provider = val
+	case "model":
+		cfg.Model = val
+	case "docs_dir":
+		cfg.DocsDir = val
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	if err := config.Write(cfgPath, cfg); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+	fmt.Printf("Set %s = %s\n", key, val)
+	return nil
+}
+
+func runConfigList(cmd *cobra.Command, args []string) error {
+	cfg := configFromContext(cmd)
+	fields := []struct{ k, v string }{
+		{"provider", cfg.Provider},
+		{"model", cfg.Model},
+		{"docs_dir", cfg.DocsDir},
+		{"mapping", cfg.Mapping},
+		{"providers.openai.api_key", maskSecret(cfg.Providers.OpenAI.APIKey)},
+		{"providers.anthropic.api_key", maskSecret(cfg.Providers.Anthropic.APIKey)},
+	}
+	for _, f := range fields {
+		fmt.Printf("%-40s %s\n", f.k, f.v)
+	}
+	return nil
+}
+
+func configFromContext(cmd *cobra.Command) *config.Config {
+	ctx := cmd.Context()
+	if ctx == nil {
+		return &config.Config{}
+	}
+	cfg, _ := ctx.Value(contextKeyConfig).(*config.Config)
+	if cfg == nil {
+		return &config.Config{}
+	}
+	return cfg
+}
+
+func configField(cfg *config.Config, key string) (string, error) {
+	switch key {
+	case "provider":
+		return cfg.Provider, nil
+	case "model":
+		return cfg.Model, nil
+	case "docs_dir":
+		return cfg.DocsDir, nil
+	case "mapping":
+		return cfg.Mapping, nil
+	default:
+		return "", fmt.Errorf("unknown config key %q", key)
+	}
+}
+
+func maskSecret(s string) string {
+	if s == "" {
+		return "(not set)"
+	}
+	if strings.HasPrefix(s, "env:") {
+		return s
+	}
+	if len(s) <= 12 {
+		return "****"
+	}
+	visible := 8
+	if visible > len(s)/2 {
+		visible = len(s) / 2
+	}
+	half := visible / 2
+	return s[:half] + strings.Repeat("*", len(s)-visible) + s[len(s)-half:]
+}

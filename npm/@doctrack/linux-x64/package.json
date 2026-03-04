@@ -1,0 +1,28 @@
+{
+  "name": "@doctrack/linux-x64",
+  "version": "0.1.0",
+  "description": "DocTrack binary for linux-x64",
+  "license": "Apache-2.0",
+  "author": "DocTrack contributors",
+  "homepage": "https://github.com/wictorn/doctrack",
+  "bugs": {
+    "url": "https://github.com/wictorn/doctrack/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wictorn/doctrack.git"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "preferUnplugged": true,
+  "files": [
+    "bin/doctrack"
+  ]
+}

@@ -1,0 +1,125 @@
+package confluence
+
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Manifest tracks which Confluence page each doc file maps to.
+type Manifest struct {
+	Pages map[string]ManifestEntry `yaml:"pages"`
+}
+
+// ManifestEntry maps a doc path to a Confluence page.
+type ManifestEntry struct {
+	PageID      string `yaml:"page_id"`
+	ContentHash string `yaml:"content_hash"`
+	Title       string `yaml:"title"`
+}
+
+// Syncer pushes documentation to Confluence.
+type Syncer struct {
+	client       *Client
+	manifest     *Manifest
+	manifestPath string
+	spaceID      string
+	parentID     string
+}
+
+// NewSyncer creates a Syncer using the given Confluence client.
+func NewSyncer(client *Client, spaceID, parentID, manifestPath string) (*Syncer, error) {
+	m, err := loadManifest(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading manifest: %w", err)
+	}
+	return &Syncer{
+		client:       client,
+		manifest:     m,
+		manifestPath: manifestPath,
+		spaceID:      spaceID,
+		parentID:     parentID,
+	}, nil
+}
+
+// SyncFile pushes the doc at docPath to Confluence, creating or updating as needed.
+func (s *Syncer) SyncFile(ctx context.Context, docPath, title string) error {
+	content, err := os.ReadFile(docPath)
+	if err != nil {
+		return fmt.Errorf("reading doc: %w", err)
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+	if entry, ok := s.manifest.Pages[docPath]; ok && entry.ContentHash == hash {
+		return nil
+	}
+	storageBody, err := ConvertMarkdown(string(content))
+	if err != nil {
+		return fmt.Errorf("converting markdown: %w", err)
+	}
+	entry, exists := s.manifest.Pages[docPath]
+	if exists && entry.PageID != "" {
+		page, err := s.client.GetPage(ctx, entry.PageID)
+		if err != nil {
+			return fmt.Errorf("fetching page: %w", err)
+		}
+		_, err = s.client.UpdatePage(ctx, entry.PageID, page.Version.Number, title, storageBody)
+		if err != nil {
+			return fmt.Errorf("updating page: %w", err)
+		}
+	} else {
+		existingPage, err := s.client.FindByTitle(ctx, s.spaceID, title)
+		if err != nil {
+			return fmt.Errorf("finding page: %w", err)
+		}
+		if existingPage != nil {
+			_, err = s.client.UpdatePage(ctx, existingPage.ID, existingPage.Version.Number, title, storageBody)
+			if err != nil {
+				return fmt.Errorf("updating existing page: %w", err)
+			}
+			entry.PageID = existingPage.ID
+		} else {
+			newPage, err := s.client.CreatePage(ctx, s.spaceID, s.parentID, title, storageBody)
+			if err != nil {
+				return fmt.Errorf("creating page: %w", err)
+			}
+			entry.PageID = newPage.ID
+		}
+	}
+	entry.ContentHash = hash
+	entry.Title = title
+	s.manifest.Pages[docPath] = entry
+	return s.saveManifest()
+}
+
+func loadManifest(path string) (*Manifest, error) {
+	m := &Manifest{Pages: make(map[string]ManifestEntry)}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return m, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading manifest: %w", err)
+	}
+	if err := yaml.Unmarshal(data, m); err != nil {
+		return nil, fmt.Errorf("parsing manifest: %w", err)
+	}
+	if m.Pages == nil {
+		m.Pages = make(map[string]ManifestEntry)
+	}
+	return m, nil
+}
+
+func (s *Syncer) saveManifest() error {
+	if err := os.MkdirAll(filepath.Dir(s.manifestPath), 0o755); err != nil {
+		return fmt.Errorf("creating manifest dir: %w", err)
+	}
+	data, err := yaml.Marshal(s.manifest)
+	if err != nil {
+		return fmt.Errorf("marshalling manifest: %w", err)
+	}
+	return os.WriteFile(s.manifestPath, data, 0o600)
+}

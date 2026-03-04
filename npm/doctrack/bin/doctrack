@@ -1,0 +1,46 @@
+#!/usr/bin/env node
+'use strict';
+
+const { execFileSync } = require('child_process');
+const path = require('path');
+
+const PLATFORMS = {
+  'darwin-arm64':  '@doctrack/darwin-arm64',
+  'darwin-x64':    '@doctrack/darwin-x64',
+  'linux-x64':     '@doctrack/linux-x64',
+  'win32-x64':     '@doctrack/win32-x64',
+};
+
+function getBinaryPath() {
+  const key = `${process.platform}-${process.arch}`;
+  const pkg = PLATFORMS[key];
+  if (!pkg) {
+    throw new Error(`Unsupported platform: ${key}. Supported: ${Object.keys(PLATFORMS).join(', ')}`);
+  }
+
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  try {
+    return require.resolve(`${pkg}/bin/doctrack${ext}`);
+  } catch (_) {
+    // Fallback: check where postinstall script puts the binary
+    const localPath = path.join(__dirname, '..', 'node_modules', pkg, 'bin', `doctrack${ext}`);
+    if (require('fs').existsSync(localPath)) {
+      return localPath;
+    }
+    throw new Error(
+      `Could not find DocTrack binary for ${key}.\n` +
+      `Try reinstalling: npm install -g doctrack`
+    );
+  }
+}
+
+try {
+  const bin = getBinaryPath();
+  execFileSync(bin, process.argv.slice(2), { stdio: 'inherit' });
+} catch (err) {
+  if (typeof err.status === 'number') {
+    process.exit(err.status);
+  }
+  console.error(err.message);
+  process.exit(1);
+}

@@ -107,7 +107,7 @@ export default function Providers() {
                 Get Started <ArrowRight size={15} />
               </Link>
               <a
-                href="https://github.com/wictorn/doctrack"
+                href="https://github.com/WictorNisa/DocTrack"
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{

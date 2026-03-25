@@ -12,7 +12,7 @@ const NAV_LINKS: NavItem[] = [
   { label: 'Features', href: '/#features' },
   { label: 'How It Works', href: '/#how-it-works' },
   { label: 'Docs', href: '/docs' },
-  { label: 'GitHub', href: 'https://github.com/wictorn/doctrack', external: true },
+  { label: 'GitHub', href: 'https://github.com/WictorNisa/DocTrack', external: true },
 ];
 
 export default function Navbar() {

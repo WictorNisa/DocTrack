@@ -228,7 +228,7 @@ export default function Hero() {
               Get Started <ArrowRight size={16} />
             </Link>
             <a
-              href="https://github.com/wictorn/doctrack"
+              href="https://github.com/WictorNisa/DocTrack"
               target="_blank"
               rel="noopener noreferrer"
               style={{

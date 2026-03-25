@@ -19,9 +19,9 @@ const LINKS: Record<string, FooterLink[]> = {
     { label: 'AI Providers', href: '/docs#ai-providers' },
   ],
   Community: [
-    { label: 'GitHub', href: 'https://github.com/wictorn/doctrack', external: true },
-    { label: 'Discussions', href: 'https://github.com/wictorn/doctrack/discussions', external: true },
-    { label: 'Issues', href: 'https://github.com/wictorn/doctrack/issues', external: true },
+    { label: 'GitHub', href: 'https://github.com/WictorNisa/DocTrack', external: true },
+    { label: 'Discussions', href: 'https://github.com/WictorNisa/DocTrack/discussions', external: true },
+    { label: 'Issues', href: 'https://github.com/WictorNisa/DocTrack/issues', external: true },
   ],
 };
 
@@ -81,7 +81,7 @@ export default function Footer() {
             </p>
             <div style={{ display: 'flex', gap: 12 }}>
               {[
-                { Icon: Github, href: 'https://github.com/wictorn/doctrack', label: 'GitHub' },
+                { Icon: Github, href: 'https://github.com/WictorNisa/DocTrack', label: 'GitHub' },
                 { Icon: Twitter, href: 'https://x.com/doctrack', label: 'Twitter' },
               ].map(({ Icon, href, label }, i) => (
                 <a
